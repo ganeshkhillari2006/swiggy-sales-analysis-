@@ -1,0 +1,89 @@
+# ------------------------------------------------------------
+# Swiggy data -> split into different files (BEGINNER VERSION)
+# ------------------------------------------------------------
+# Step 0: install once in terminal:  pip install pandas openpyxl
+# Step 1: keep this file and the Excel file in the SAME folder
+# Step 2: run:  python swiggy_beginner.py
+# ------------------------------------------------------------
+
+import pandas as pd
+import os
+
+# ---------- 1. Read the Excel file ----------
+# sheet_name = the sheet that has the data
+# usecols    = take only first 11 columns (the rest are empty)
+df = pd.read_excel("Swiggy_Raw_Data_Excel.xlsx",
+                   sheet_name="Swiggy Data",
+                   usecols=range(11))
+
+print("Total rows:", len(df))
+print(df.head())          # show first 5 rows
+
+# ---------- 2. Clean the data ----------
+df = df.drop_duplicates()                       # remove duplicate rows
+df["Sales"] = df["Price (INR)"] * df["Rating Count"]   # Sales = Price x Rating Count
+
+# ---------- 3. Make a folder for output files ----------
+os.makedirs("output_files", exist_ok=True)
+
+# ---------- 4. Split by State (one file per state) ----------
+for state in df["State"].unique():
+    state_data = df[df["State"] == state]                 # only this state's rows
+    file_name = "output_files/State_" + state.replace(" ", "_") + ".csv"
+    state_data.to_csv(file_name, index=False)
+    print("Saved:", file_name)
+
+# ---------- 5. Split by City (one file per city) ----------
+for city in df["City"].unique():
+    city_data = df[df["City"] == city]
+    file_name = "output_files/City_" + city.replace(" ", "_") + ".csv"
+    city_data.to_csv(file_name, index=False)
+
+# ---------- 6. Summary files (like SQL GROUP BY) ----------
+# Total sales by state
+sales_by_state = df.groupby("State")["Sales"].sum().reset_index()
+sales_by_state = sales_by_state.sort_values("Sales", ascending=False)
+sales_by_state.to_csv("output_files/Sales_by_State.csv", index=False)
+
+# Average rating by city
+rating_by_city = df.groupby("City")["Rating"].mean().round(2).reset_index()
+rating_by_city = rating_by_city.sort_values("Rating", ascending=False)
+rating_by_city.to_csv("output_files/Rating_by_City.csv", index=False)
+
+# Top 5 cities by rating
+rating_by_city.head(5).to_csv("output_files/Top5_Cities.csv", index=False)
+
+# Last 5 cities by rating
+rating_by_city.tail(5).to_csv("output_files/Last5_Cities.csv", index=False)
+
+# ---------- 7. Use SQL inside Python (sqlite3) ----------
+import sqlite3
+
+conn = sqlite3.connect(":memory:")                # temporary database
+df2 = df.copy()
+df2.columns = ["State", "City", "Order_Date", "Restaurant_Name", "Location",
+               "Category", "Dish_Name", "Price_INR", "Rating",
+               "Rating_Count", "Sales"]           # SQL friendly names
+df2.to_sql("swiggy_data", conn, index=False)      # make a SQL table
+
+# write your SQL query here
+query = """
+SELECT Restaurant_Name, City, SUM(Sales) AS Total_Sales
+FROM swiggy_data
+GROUP BY Restaurant_Name, City
+ORDER BY Total_Sales DESC
+LIMIT 10
+"""
+top_restaurants = pd.read_sql_query(query, conn)  # run SQL
+top_restaurants.to_csv("output_files/Top10_Restaurants.csv", index=False)
+print(top_restaurants)
+
+conn.close()
+
+# ---------- 8. One Excel file with many sheets ----------
+with pd.ExcelWriter("output_files/Swiggy_Summary.xlsx") as writer:
+    sales_by_state.to_excel(writer, sheet_name="Sales_by_State", index=False)
+    rating_by_city.to_excel(writer, sheet_name="Rating_by_City", index=False)
+    top_restaurants.to_excel(writer, sheet_name="Top10_Restaurants", index=False)
+
+print("All files created in folder: output_files")
